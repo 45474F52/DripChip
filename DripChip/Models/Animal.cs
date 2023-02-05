@@ -9,15 +9,17 @@ namespace DripChip.Models
         public float Weight { get; set; }
         public float Length { get; set; }
         public float Height { get; set; }
-        public string Gender { get; set; } = "OTHER";
-        private string _lifeStatus = "DEAD";
-        public string LifeStatus
+        [JsonConverter(typeof(JsonStringEnumConverter))]
+        public Gender Gender { get; set; }
+        private LifeStatus _lifeStatus;
+        [JsonConverter(typeof(JsonStringEnumConverter))]
+        public LifeStatus LifeStatus
         {
             get => _lifeStatus;
             set
             {
                 _lifeStatus = value;
-                if (value == "DEATH")
+                if (value == LifeStatus.DEAD)
                     DeathDateTime = DateTime.Now.ToString("O");
             }
         }
@@ -31,7 +33,7 @@ namespace DripChip.Models
 
         public Animal()
         {
-            LifeStatus = "ALIVE";
+            LifeStatus = LifeStatus.ALIVE;
             ChippingDateTime = DateTime.Now.ToString("O");
             DeathDateTime = null;
         }
@@ -60,15 +62,11 @@ namespace DripChip.Models
             string animalTypes = string.Empty;
             string visitedLocations = string.Empty;
 
-            foreach (var type in AnimalTypes)
-            {
+            foreach (long type in AnimalTypes)
                 animalTypes += $"\t{type},\n";
-            }
 
-            foreach (var location in VisitedLocations)
-            {
+            foreach (long location in VisitedLocations)
                 visitedLocations += $"\t{location},\n";
-            }
 
             return
                 $"Id: {Id},\n" +
@@ -93,8 +91,8 @@ namespace DripChip.Models
         public float Weight { get; set; }
         public float Length { get; set; }
         public float Height { get; set; }
-        public string Gender { get; set; } = "OTHER";
-        public string LifeStatus { get; set; } = "DEAD";
+        public Gender Gender { get; set; }
+        public LifeStatus LifeStatus { get; set; }
         public string ChippingDateTime { get; set; }
         public int ChipperId { get; set; }
         public long ChippingLocationId { get; set; }
@@ -111,18 +109,18 @@ namespace DripChip.Models
 
             bool isContains = true;
 
-            foreach (var fm1props in this.GetType().GetProperties())
+            foreach (var fm1prop in this.GetType().GetProperties())
             {
-                if (fm1props.Name == nameof(ChipperId)
-                    || fm1props.Name == nameof(ChippingLocationId)
-                    || fm1props.Name == nameof(LifeStatus)
-                    || fm1props.Name == nameof(Gender))
+                if (fm1prop.Name == nameof(ChipperId)
+                    || fm1prop.Name == nameof(ChippingLocationId)
+                    || fm1prop.Name == nameof(LifeStatus)
+                    || fm1prop.Name == nameof(Gender))
                 {
-                    foreach (var fm2props in fm.GetType().GetProperties())
+                    foreach (var fm2prop in fm.GetType().GetProperties())
                     {
-                        if (fm1props.Name == fm2props.Name)
+                        if (fm1prop.Name == fm2prop.Name)
                         {
-                            if (fm1props.GetValue(this)!.ToString()!.ToLower().Contains(fm2props.GetValue(fm)!.ToString()!.ToLower()))
+                            if (fm1prop.GetValue(this)!.ToString()!.ToLower().Contains(fm2prop.GetValue(fm)!.ToString()!.ToLower()))
                             {
                                 isContains = true;
                                 break;

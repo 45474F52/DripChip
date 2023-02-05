@@ -1,10 +1,12 @@
-﻿using System.Text.Json;
+﻿using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Unicode;
 
 namespace DripChip.Core.Serialization
 {
     public class JsonAsyncSerializer<T> : IAsyncSerializer<T>
     {
-        private readonly JsonSerializerOptions? _options;
+        private readonly JsonSerializerOptions? _options = new() { Encoder = JavaScriptEncoder.Create(UnicodeRanges.All) };
 
         public string? Path { get; set; }
 
@@ -15,17 +17,19 @@ namespace DripChip.Core.Serialization
         public async Task<T?> DeserializeAsync()
         {
             CheckPath();
+
             if (File.Exists(Path))
             {
                 using FileStream stream = new(Path!, FileMode.Open, FileAccess.Read, FileShare.Read);
-                T? value = (T?)await JsonSerializer.DeserializeAsync(stream, typeof(T?), _options);
+                object? v = await JsonSerializer.DeserializeAsync(stream, typeof(T), _options);
+                T? value = (T?)v;
                 return value;
             }
 
             return default;
         }
 
-        public async Task SerializeAsync(T value)
+        public async Task SerializeAsync(object value)
         {
             CheckPath();
 
@@ -34,7 +38,7 @@ namespace DripChip.Core.Serialization
             await JsonSerializer.SerializeAsync(stream, value, _options);
         }
 
-        public async Task OverwriteFileAsync(T value)
+        public async Task OverwriteFileAsync(object value)
         {
             CheckPath();
 

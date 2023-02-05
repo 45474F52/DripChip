@@ -1,8 +1,8 @@
 ﻿using DripChip.Core.Serialization;
+using DripChip.DataBase;
 using DripChip.Models;
 using Microsoft.AspNetCore.Mvc;
-using System.Text.Encodings.Web;
-using System.Text.Unicode;
+using System.ComponentModel.DataAnnotations;
 
 namespace DripChip.Controllers
 {
@@ -10,7 +10,7 @@ namespace DripChip.Controllers
     [Route("Accounts")]
     public sealed class AccountsController : BaseController<Account>
     {
-        protected internal override string CurrentPath => "DataBase/Accounts.json";
+        protected internal override string PathToCurrentEntities => "DataBase/Accounts.json";
 
         private IAsyncSerializer<IEnumerable<Account>>? _serializer;
         protected internal override IAsyncSerializer<IEnumerable<Account>> Serializer
@@ -21,19 +21,13 @@ namespace DripChip.Controllers
 
         public AccountsController()
         {
-            Serializer = new JsonAsyncSerializer<IEnumerable<Account>>(new System.Text.Json.JsonSerializerOptions()
-            { Encoder = JavaScriptEncoder.Create(UnicodeRanges.All) })
-            { Path = Path.Combine(Environment.CurrentDirectory, CurrentPath) };
+            Serializer = new JsonAsyncSerializer<IEnumerable<Account>>()
+            { Path = Path.Combine(Environment.CurrentDirectory, PathToCurrentEntities) };
 
             InitializeEntities();
             foreach (var account in Entities)
-            {
                 account.InitializeFilterModel();
-            }
         }
-
-        [HttpGet]
-        public ActionResult<IEnumerable<Account>> GetAccounts() => Get();
 
         [HttpGet("{id}")]
         public ActionResult<Account> GetAccount(int? id)
@@ -49,7 +43,12 @@ namespace DripChip.Controllers
         }
 
         [HttpGet("search")]
-        public ActionResult<IEnumerable<AccountFilterModel>> SearchAccounts(string firstName, string lastName, string email, int? from, int? size)
+        public ActionResult<IEnumerable<AccountFilterModel>> SearchAccounts(
+            [FromQuery] string firstName,
+            [FromQuery] string lastName,
+            [FromQuery] string email,
+            [FromQuery] int? from,
+            [FromQuery] int? size)
         {
             if (Entities == null)
                 return Unauthorized();
@@ -66,12 +65,9 @@ namespace DripChip.Controllers
 
             IEnumerable<AccountFilterModel> filterModels = new List<AccountFilterModel>();
 
-            foreach (var account in Entities)
+            foreach (var account in Entities.Where(account => account.Model.Contains(sendedFilterModel)))
             {
-                if (account.Model.Contains(sendedFilterModel))
-                {
-                    filterModels = filterModels.Append(account.Model);
-                }
+                filterModels = filterModels.Append(account.Model);
             }
 
             filterModels = filterModels.Skip(from ?? 0);
@@ -81,36 +77,63 @@ namespace DripChip.Controllers
             return Ok(filterModels);
         }
 
-        #region NotImplemented
-        /*
-        [HttpPost("{Account}")]
-        [ActionName("Authentication")]
-        public async Task<ActionResult<Account>> PostAsync([FromBody] Account account)
+        [HttpPost("registration")]
+        public async Task<ActionResult<Account>> RegistrationAccount(string? fName, string? lName, string? email, string? password)
         {
-            account.Id = SetNewId();
-            Accounts.Add(account);
-            await _serializer.OverwriteFileAsync(Accounts);
-            return Ok(account);
-        }
-
-        [HttpPut("{Account}")]
-        [ActionName("UpdateAccount")]
-        public async Task<ActionResult<Account>> PutAsync([FromBody] Account accountData)
-        {
-            int listId = Accounts.IndexOf(accountData);
-            if (listId != -1)
+            if (ValidateRequestDatas(fName, lName, email, password))
             {
-                Accounts[listId] = accountData;
-                await _serializer.OverwriteFileAsync(Accounts);
-                return Ok(accountData);
+                IEnumerable<Account>? accounts = await new GetEntities<Account>(Serializer).ReceiveEnumerable();
+                if (accounts != null)
+                {
+                    Account? account = accounts.FirstOrDefault(a => a.Email.ToLower() == email!.ToLower());
+
+                    if (account == null)
+                    {
+                        account = new()
+                        {
+                            Id = SetNewId(),
+                            FirstName = fName!,
+                            LastName = lName!,
+                            Email = email!,
+                            Password = password!
+                        };
+                        account.InitializeFilterModel();
+                        //Сохранить новый аккаунт в файл
+                        return Ok(account.Model);
+                    }
+
+                    return Conflict();
+                }
             }
 
-            return NotFound();
+            return BadRequest();
+        }
+
+        private static bool ValidateRequestDatas(string? fName, string? lName, string? email, string? password)
+        {
+            var emailChecker = new EmailAddressAttribute();
+            if (!string.IsNullOrWhiteSpace(fName) &&
+                !string.IsNullOrWhiteSpace(lName) &&
+                !string.IsNullOrWhiteSpace(email) &&
+                !string.IsNullOrWhiteSpace(password))
+            {
+                if (emailChecker.IsValid(email))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        /*
+        [HttpPut]
+        public async Task<ActionResult<Account>> UpdateAccount(int? id, string? fName, string? lName, string? email, string? password)
+        {
+
         }
 
         [HttpDelete("{id}")]
-        [ActionName("Delete")]
-        public async Task<ActionResult<Account>> DeleteAsync(int id)
+        public async Task<ActionResult<Account>> DeleteAccount(int? id)
         {
             Account? account = Accounts.FirstOrDefault(a => a.Id == id);
             if (account != null)
@@ -127,8 +150,6 @@ namespace DripChip.Controllers
             return NotFound();
         }
         */
-        #endregion NotImplemented
-
         private int SetNewId() => Entities.Select(x => x.Id).Max() + 1;
     }
 }

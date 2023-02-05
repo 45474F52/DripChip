@@ -1,0 +1,32 @@
+[
+  {
+    "Id": 1,
+    "Latitude": 80.45,
+    "Longitude": 33.15
+  },
+  {
+    "Id": 2,
+    "Latitude": 10.27,
+    "Longitude": -20.67
+  },
+  {
+    "Id": 3,
+    "Latitude": 45.45,
+    "Longitude": -54.98
+  },
+  {
+    "Id": 4,
+    "Latitude": -33.71,
+    "Longitude": -150.04
+  },
+  {
+    "Id": 5,
+    "Latitude": -76.23,
+    "Longitude": 100.04
+  },
+  {
+    "Id": 6,
+    "Latitude": 76.23,
+    "Longitude": 100.04
+  }
+]

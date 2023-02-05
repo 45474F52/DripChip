@@ -2,10 +2,6 @@
 using DripChip.DataBase;
 using DripChip.Models;
 using Microsoft.AspNetCore.Mvc;
-using System.Text.Encodings.Web;
-using System.Text.Unicode;
-using System.Linq;
-using Microsoft.AspNetCore.Mvc.ApplicationModels;
 
 namespace DripChip.Controllers
 {
@@ -13,7 +9,9 @@ namespace DripChip.Controllers
     [Route("Animals")]
     public sealed class AnimalsController : BaseController<Animal>
     {
-        protected internal override string CurrentPath => "DataBase/Animals.json";
+        protected internal override string PathToCurrentEntities => "DataBase/Animals.json";
+        private static string VisitedLocationsPath => "DataBase/AnimalsVisitedLocations.json";
+        private static string LocationPointsPath => "Database/LocationPoints.json";
 
         private IAsyncSerializer<IEnumerable<Animal>>? _serializer;
         protected internal override IAsyncSerializer<IEnumerable<Animal>> Serializer
@@ -24,19 +22,13 @@ namespace DripChip.Controllers
 
         public AnimalsController()
         {
-            Serializer = new JsonAsyncSerializer<IEnumerable<Animal>>(new System.Text.Json.JsonSerializerOptions()
-            { Encoder = JavaScriptEncoder.Create(UnicodeRanges.All) })
-            { Path = Path.Combine(Environment.CurrentDirectory, CurrentPath) };
+            Serializer = new JsonAsyncSerializer<IEnumerable<Animal>>()
+            { Path = Path.Combine(Environment.CurrentDirectory, PathToCurrentEntities) };
 
             InitializeEntities();
             foreach (var animal in Entities)
-            {
                 animal.InitializeFilterModel();
-            }
         }
-
-        [HttpGet]
-        public ActionResult<IEnumerable<Animal>> GetAnimals() => Get();
 
         [HttpGet("{id}")]
         public ActionResult<Animal> GetAnimal(long? id)
@@ -55,11 +47,12 @@ namespace DripChip.Controllers
         }
 
         [HttpGet("{id}/locations")]
-        public async Task<ActionResult<IEnumerable<AnimalVisitedLocations>>> GetAnimalVisitedLocations(long? id,
-            string startDateTime,
-            string endDateTime,
-            int? from,
-            int? size)
+        public async Task<ActionResult<IEnumerable<AnimalVisitedLocations>>> GetAnimalVisitedLocations(
+            long? id,
+            [FromQuery] string startDateTime,
+            [FromQuery] string endDateTime,
+            [FromQuery] int? from,
+            [FromQuery] int? size)
         {
             if (Entities == null)
                 return Unauthorized();
@@ -67,17 +60,16 @@ namespace DripChip.Controllers
             if (id == null || id <= 0)
                 return BadRequest();
 
-            if (from >= 0 && from != null && size > 0 && size != null)
+            if (from < 0 && from == null && size <= 0 && size == null)
                 return BadRequest();
 
             IEnumerable<long> visitedLocationsId = Entities.Single(a => a.Id == id).VisitedLocations;
+            /////
+            JsonAsyncSerializer<IEnumerable<AnimalVisitedLocations>> vlSerializer = new()
+            { Path = Path.Combine(Environment.CurrentDirectory, VisitedLocationsPath) };
 
-            JsonAsyncSerializer<IEnumerable<AnimalVisitedLocations>> serializer = new(new System.Text.Json.JsonSerializerOptions()
-            { Encoder = JavaScriptEncoder.Create(UnicodeRanges.All) })
-            { Path = Path.Combine(Environment.CurrentDirectory, CurrentPath) };
-
-            IEnumerable<AnimalVisitedLocations>? visitedLocations = await new GetEntities<AnimalVisitedLocations>(serializer).Receive();
-            
+            IEnumerable<AnimalVisitedLocations>? visitedLocations = await new GetEntities<AnimalVisitedLocations>(vlSerializer).ReceiveEnumerable();
+            /////
             if (visitedLocations != null)
             {
                 IEnumerable<AnimalVisitedLocations> animalVisitedLocations = new List<AnimalVisitedLocations>();
@@ -96,26 +88,20 @@ namespace DripChip.Controllers
         }
 
         [HttpGet("search")]
-        public ActionResult<IEnumerable<AnimalsFilterModel>> SearchAccounts(
-            string startDateTime,
-            string endDateTime,
-            int chipperId,
-            long chippingLocationId,
-            string lifeStatus,
-            string gender,
-            int? from,
-            int? size)
+        public ActionResult<IEnumerable<AnimalsFilterModel>> SearchAnimals(
+            [FromQuery] string startDateTime,
+            [FromQuery] string endDateTime,
+            [FromQuery] int chipperId,
+            [FromQuery] long chippingLocationId,
+            [FromQuery] string lifeStatus,
+            [FromQuery] string gender,
+            [FromQuery] int? from,
+            [FromQuery] int? size)
         {
             if (Entities == null)
                 return Unauthorized();
 
-            if (!Validate(
-                chipperId,
-                chippingLocationId,
-                lifeStatus,
-                gender,
-                from,
-                size))
+            if (!ValidateRequestDatas(chipperId, chippingLocationId, lifeStatus, gender, from, size))
                 return BadRequest();
 
             //DateTime start;
@@ -133,13 +119,13 @@ namespace DripChip.Controllers
             {
                 ChipperId = chipperId,
                 ChippingLocationId = chippingLocationId,
-                LifeStatus = lifeStatus,
-                Gender = gender
+                LifeStatus = (LifeStatus)Enum.Parse(typeof(LifeStatus), lifeStatus),
+                Gender = (Gender)Enum.Parse(typeof(Gender), gender)
             };
 
             IEnumerable<AnimalsFilterModel> filterModels = new List<AnimalsFilterModel>();
 
-            foreach (var account in Entities)
+            foreach (var animal in Entities)
             {
                 //DateTime parsedTime = DateTime.ParseExact(account.Model.ChippingDateTime, "O", null, System.Globalization.DateTimeStyles.RoundtripKind);
                 //if (parsedTime >= start && parsedTime <= end)
@@ -150,9 +136,9 @@ namespace DripChip.Controllers
                 //    }
                 //}
 
-                if (account.Model.Contains(sendedFilterModel))
+                if (animal.Model.Contains(sendedFilterModel))
                 {
-                    filterModels = filterModels.Append(account.Model);
+                    filterModels = filterModels.Append(animal.Model);
                 }
             }
 
@@ -163,16 +149,17 @@ namespace DripChip.Controllers
             return Ok(filterModels);
         }
 
-        private static bool ValidateData(string[] dates, string pattern) => throw new NotImplementedException();
-        private static bool Validate(int chipperId, long chippingLocationId, string lifeStatus, string gender, int? from, int? size)
+        private long SetNewId() => Entities.Select(x => x.Id).Max() + 1;
+        private static bool ValidateDate(string[] dates, string pattern) => throw new NotImplementedException();
+        private bool ValidateRequestDatas(int chipperId, long chippingLocationId, string lifeStatus, string gender, int? from, int? size)
         {
-            if (from >= 0 && from != null && size > 0 && size != null)
+            if (ValidateFromSize(from, size))
             {
                 if (chipperId > 0 & chippingLocationId > 0)
                 {
-                    if (lifeStatus == "ALIVE" || lifeStatus == "DEAD")
+                    if (Enum.IsDefined(typeof(LifeStatus), lifeStatus))
                     {
-                        if (gender == "MALE" || gender == "FEMALE" || gender == "OTHER")
+                        if (Enum.IsDefined(typeof(Gender), gender))
                         {
                             return true;
                         }

@@ -18,13 +18,21 @@
             else
                 app.UseHsts();
 
-            app.UseRouting();
-            app.UseStaticFiles();
-            app.UseHttpsRedirection();
-            app.UseEndpoints(endpoints =>
+            try
             {
-                endpoints.MapControllers();
-            });
+                app.UseRouting();
+                app.UseStaticFiles();
+                app.UseHttpsRedirection();
+                app.UseEndpoints(endpoints =>
+                {
+                    endpoints.MapControllers();
+                });
+            }
+            catch (Exception)
+            {
+
+                throw;
+            }
         }
     }
 }

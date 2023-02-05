@@ -8,7 +8,7 @@ namespace DripChip.DataBase
 
         public GetEntities(IAsyncSerializer<IEnumerable<T>> serializer) => _serializer = serializer;
 
-        public async Task<IEnumerable<T>?> Receive()
+        public async Task<IEnumerable<T>?> ReceiveEnumerable()
         {
             IEnumerable<T>? values = await _serializer.DeserializeAsync();
             return values;

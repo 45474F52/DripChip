@@ -11,5 +11,7 @@
         /// Географическая долгота в градусах
         /// </summary>
         public double Longitude { get; set; }
+
+        public override string ToString() => $"Id: {Id},\nLatitude: {Latitude},\nLongitude: {Longitude}\n";
     }
 }

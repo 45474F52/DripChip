@@ -23,10 +23,8 @@ namespace DripChip.Models
             };
         }
 
-        public override string ToString()
-        {
-            return $"{Id}|{FirstName}|{LastName}|{Email}|{Password}";
-        }
+        public override string ToString() =>
+            $"Id: {Id},\nFirstName: {FirstName}|,\nLastName: {LastName},\nEmail: {Email},nPassword: {Password}\n";
     }
 
     public sealed class AccountFilterModel
