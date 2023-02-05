@@ -1,0 +1,44 @@
+[
+  {
+    "AnimalTypes": [],
+    "ChipperId": 1,
+    "ChippingDateTime": "05.02.23 2:29:23",
+    "ChippingLocationId": 1,
+    "DeathDateTime": null,
+    "Gender": "FEMALE",
+    "Height": 0.2,
+    "Id": 1,
+    "Length": 1.5,
+    "LifeStatus": "ALIVE",
+    "VisitedLocations": [],
+    "Weight": 7
+  },
+  {
+    "Id": 2,
+    "AnimalTypes": [],
+    "Weight": 5,
+    "Length": 1.3,
+    "Height": 0.17,
+    "Gender": "FEMALE",
+    "LifeStatus": "ALIVE",
+    "ChippingDateTime": "05.02.23 2:29:23",
+    "ChipperId": 1,
+    "ChippingLocationId": 1,
+    "VisitedLocations": [],
+    "DeathDateTime": null
+  },
+  {
+    "Id": 3,
+    "AnimalTypes": [],
+    "Weight": 15,
+    "Length": 2.3,
+    "Height": 1.25,
+    "Gender": "MALE",
+    "LifeStatus": "ALIVE",
+    "ChippingDateTime": "05.02.23 2:29:23",
+    "ChipperId": 2,
+    "ChippingLocationId": 2,
+    "VisitedLocations": [],
+    "DeathDateTime": null
+  }
+]
