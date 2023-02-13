@@ -1,32 +1,26 @@
-﻿using DripChip.Core.Serialization;
-using DripChip.DataBase;
-using DripChip.Models;
+﻿using DripChip.Models;
+using DripChip.Core.Helper;
+using DripChip.DataBase.Repositories;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using System.Text.Json.Nodes;
 using System.ComponentModel.DataAnnotations;
 
 namespace DripChip.Controllers
 {
     [ApiController]
     [Route("Accounts")]
-    public sealed class AccountsController : BaseController<Account>
+    public sealed class AccountsController : ControllerBase
     {
-        protected internal override string PathToCurrentEntities => "DataBase/Accounts.json";
+        private readonly IAccountRepository _accountRepository;
+        private readonly IAnimalRepository _animalRepository;
+        private readonly List<Account> _accounts;
 
-        private IAsyncSerializer<IEnumerable<Account>>? _serializer;
-        protected internal override IAsyncSerializer<IEnumerable<Account>> Serializer
+        public AccountsController(IAccountRepository accountRepository, IAnimalRepository animalRepository)
         {
-            get => _serializer ?? throw new NullReferenceException("Сериализатор не был создан");
-            set => _serializer = value;
-        }
-
-        public AccountsController()
-        {
-            Serializer = new JsonAsyncSerializer<IEnumerable<Account>>()
-            { Path = Path.Combine(Environment.CurrentDirectory, PathToCurrentEntities) };
-
-            InitializeEntities();
-            foreach (var account in Entities)
-                account.InitializeFilterModel();
+            _accountRepository = accountRepository;
+            _animalRepository = animalRepository;
+            _accounts = _accountRepository.GetAll().ToList();
         }
 
         [HttpGet("{id}")]
@@ -35,121 +29,127 @@ namespace DripChip.Controllers
             if (id == null || id <= 0)
                 return BadRequest();
 
-            Account? account = Entities.FirstOrDefault(a => a.Id == id);
-            if (account == null)
-                return NotFound();
-
-            return Ok(account);
+            Account? account = _accounts.FirstOrDefault(a => a.Id == id);
+            return account != null ? Ok(account) : NotFound();
         }
 
+        [Authorize]
         [HttpGet("search")]
-        public ActionResult<IEnumerable<AccountFilterModel>> SearchAccounts(
+        public ActionResult<IEnumerable<Account>> SearchAccounts(
             [FromQuery] string firstName,
             [FromQuery] string lastName,
             [FromQuery] string email,
             [FromQuery] int? from,
             [FromQuery] int? size)
         {
-            if (Entities == null)
-                return Unauthorized();
-
             if (from < 0 || from == null || size <= 0 || size == null)
                 return BadRequest();
 
-            AccountFilterModel sendedFilterModel = new()
+            Account sendedAccount = new()
             {
                 FirstName = firstName,
                 LastName = lastName,
                 Email = email
             };
 
-            IEnumerable<AccountFilterModel> filterModels = new List<AccountFilterModel>();
+            IEnumerable<Account> accounts = new List<Account>();
 
-            foreach (var account in Entities.Where(account => account.Model.Contains(sendedFilterModel)))
-            {
-                filterModels = filterModels.Append(account.Model);
-            }
+            foreach (var account in _accounts.Where(account => account.Contains(sendedAccount)))
+                accounts = accounts.Append(account);
 
-            filterModels = filterModels.Skip(from ?? 0);
-            filterModels = filterModels.Take(size ?? 100);
-            filterModels = filterModels.OrderBy(a => a.Id);
+            accounts = accounts.Skip(from ?? 0);
+            accounts = accounts.Take(size ?? 100);
+            accounts = accounts.OrderBy(a => a.Id);
 
-            return Ok(filterModels);
+            return Ok(accounts);
         }
 
-        [HttpPost("registration")]
-        public async Task<ActionResult<Account>> RegistrationAccount(string? fName, string? lName, string? email, string? password)
+        [Authorize]
+        [HttpPut("{id}")]
+        public async Task<ActionResult<Account>> UpdateAccount(int? id, [FromBody] JsonObject data)
         {
-            if (ValidateRequestDatas(fName, lName, email, password))
-            {
-                IEnumerable<Account>? accounts = await new GetEntities<Account>(Serializer).ReceiveEnumerable();
-                if (accounts != null)
-                {
-                    Account? account = accounts.FirstOrDefault(a => a.Email.ToLower() == email!.ToLower());
+            string? firstName = JsonObjectParser<string>.Parse(data, nameof(firstName));
+            string? lastName = JsonObjectParser<string>.Parse(data, nameof(lastName));
+            string? email = JsonObjectParser<string>.Parse(data, nameof(email));
+            string? password = JsonObjectParser<string>.Parse(data, nameof(password));
 
-                    if (account == null)
+            if (ValidateRequestData(firstName, lastName, email, password))
+            {
+                if (_accounts.FirstOrDefault(a => a.Email.ToLower() == email!.ToLower()) == null)
+                {
+                    Account? account = _accounts.FirstOrDefault(a => a.Id == id);
+                    if (account != null)
                     {
-                        account = new()
-                        {
-                            Id = SetNewId(),
-                            FirstName = fName!,
-                            LastName = lName!,
-                            Email = email!,
-                            Password = password!
-                        };
-                        account.InitializeFilterModel();
-                        //Сохранить новый аккаунт в файл
-                        return Ok(account.Model);
+                        int index = _accounts.IndexOf(account);
+
+                        _accounts.ElementAt(index).FirstName = firstName!;
+                        _accounts.ElementAt(index).LastName = lastName!;
+                        _accounts.ElementAt(index).Email = email!;
+                        _accounts.ElementAt(index).Password = password!;
+
+                        await _accountRepository.Update(_accounts.ElementAt(index));
+                        return Ok(_accounts.ElementAt(index));
                     }
 
-                    return Conflict();
+                    return Forbid();
+                }
+
+                return Conflict();
+            }
+
+            return BadRequest();
+        }
+
+        [Authorize]
+        [HttpDelete("{id}")]
+        public async Task<ActionResult> DeleteAccount(int? id)
+        {
+            if (id != null && id > 0)
+            {
+                if (!IsAnimalsUsed(id))
+                {
+                    Account? account = _accounts.FirstOrDefault(a => a.Id == id);
+                    if (account != null)
+                    {
+                        _accounts.Remove(account);
+                        await _accountRepository.Delete((int)id);
+                        return Ok();
+                    }
+
+                    return Forbid();
                 }
             }
 
             return BadRequest();
         }
 
-        private static bool ValidateRequestDatas(string? fName, string? lName, string? email, string? password)
+        private bool IsAnimalsUsed(int? id)
         {
-            var emailChecker = new EmailAddressAttribute();
+            if (id != null)
+            {
+                IEnumerable<Animal>? animals = _animalRepository.GetAll();
+
+                if (animals != null)
+                    return animals.FirstOrDefault(a => a.ChipperId == id) != null;
+            }
+
+            return false;
+        }
+
+        private static bool ValidateRequestData(string? fName, string? lName, string? email, string? password)
+        {
+            EmailAddressAttribute emailChecker = new();
+
             if (!string.IsNullOrWhiteSpace(fName) &&
                 !string.IsNullOrWhiteSpace(lName) &&
                 !string.IsNullOrWhiteSpace(email) &&
                 !string.IsNullOrWhiteSpace(password))
             {
                 if (emailChecker.IsValid(email))
-                {
                     return true;
-                }
             }
 
             return false;
         }
-        /*
-        [HttpPut]
-        public async Task<ActionResult<Account>> UpdateAccount(int? id, string? fName, string? lName, string? email, string? password)
-        {
-
-        }
-
-        [HttpDelete("{id}")]
-        public async Task<ActionResult<Account>> DeleteAccount(int? id)
-        {
-            Account? account = Accounts.FirstOrDefault(a => a.Id == id);
-            if (account != null)
-            {
-                int listId = Accounts.IndexOf(account);
-                if (listId != -1)
-                {
-                    Accounts.RemoveAt(listId);
-                    await _serializer.OverwriteFileAsync(Accounts);
-                    return Ok(account);
-                }
-            }
-
-            return NotFound();
-        }
-        */
-        private int SetNewId() => Entities.Select(x => x.Id).Max() + 1;
     }
 }

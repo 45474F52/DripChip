@@ -1,73 +1,72 @@
-﻿using DripChip.Core.Serialization;
-using DripChip.DataBase;
+﻿using DripChip.Core.Helper;
+using DripChip.DataBase.Repositories;
 using DripChip.Models;
 using Microsoft.AspNetCore.Mvc;
-using System.Text.Encodings.Web;
 using System.Text.Json.Nodes;
-using System.Text.Unicode;
 
 namespace DripChip.Controllers
 {
     [ApiController]
     [Route("animals/types")]
-    public class AnimalsTypesController : BaseController<AnimalsType>
+    public class AnimalsTypesController : ControllerBase
     {
-        protected internal override string PathToCurrentEntities => "DataBase/AnimalsTypes.json";
+        private readonly IAnimalRepository _animalRepository;
+        private readonly IAnimalTypeRepository _animalTypeRepository;
+        private readonly List<AnimalType> _animalTypes;
 
-        private IAsyncSerializer<IEnumerable<AnimalsType>>? _serializer;
-        protected internal override IAsyncSerializer<IEnumerable<AnimalsType>> Serializer
+        public AnimalsTypesController(IAnimalRepository animalRepository, IAnimalTypeRepository animalTypeRepository)
         {
-            get => _serializer ?? throw new NullReferenceException("Сериализатор не был создан");
-            set => _serializer = value;
-        }
-
-        public AnimalsTypesController()
-        {
-            Serializer = new JsonAsyncSerializer<IEnumerable<AnimalsType>>()
-            { Path = Path.Combine(Environment.CurrentDirectory, PathToCurrentEntities) };
-
-            InitializeEntities();
+            _animalRepository = animalRepository;
+            _animalTypeRepository = animalTypeRepository;
+            _animalTypes = _animalTypeRepository.GetAll().ToList();
         }
 
         [HttpGet("{id}")]
-        public async Task<ActionResult<AnimalsType>> GetAnimalTypes(long? id)
+        public ActionResult<AnimalType> GetAnimalTypes(long? id)
         {
             if (id == null || id <= 0)
                 return BadRequest();
 
-            IEnumerable<AnimalsType>? animalsTypes = await new GetEntities<AnimalsType>(Serializer).ReceiveEnumerable();
-            if (animalsTypes != null)
-            {
-                AnimalsType? animalsType = animalsTypes.FirstOrDefault(t => t.Id == id);
-                if (animalsType != null)
-                {
-                    return Ok(animalsType);
-                }
-            }
-
-            return NotFound();
+            AnimalType? animalsType = _animalTypes.FirstOrDefault(t => t.Id == id);
+            return animalsType != null ? Ok(animalsType) : NotFound();
         }
 
         [HttpPost]
-        public async Task<ActionResult<AnimalsType>> AddAnimalsType([FromBody] JsonObject type)
+        public async Task<ActionResult<AnimalType>> AddAnimalType([FromBody] JsonObject data)
         {
-            string? stype = string.Empty;
-            type.TryGetPropertyValue("type", out JsonNode? jsonNode);
-            jsonNode?.AsValue().TryGetValue(out stype);
+            string? type = JsonObjectParser<string>.Parse(data, nameof(type));
 
-            if (string.IsNullOrWhiteSpace(stype))
+            if (string.IsNullOrWhiteSpace(type))
                 return BadRequest();
 
-            IEnumerable<AnimalsType>? animalsTypes = await new GetEntities<AnimalsType>(Serializer).ReceiveEnumerable();
-
-            if (animalsTypes != null)
+            if (!_animalTypes.Any(t => t.Type.ToLower().Contains(type.ToLower())))
             {
-                if (!animalsTypes.Any(t => t.Type.ToLower().Contains(stype.ToLower())))
+                AnimalType animalType = new() { Id = SetNewId(), Type = type };
+                _animalTypes.Add(animalType);
+                await _animalTypeRepository.Create(animalType);
+                return Ok(animalType);
+            }
+
+            return Conflict();
+        }
+
+        [HttpPut("{id}")]
+        public async Task<ActionResult<AnimalType>> UpdateAnimalsType(long? id, [FromBody] JsonObject data)
+        {
+            string? type = JsonObjectParser<string>.Parse(data, nameof(type));
+
+            if (id == null || id <= 0 || string.IsNullOrWhiteSpace(type))
+                return BadRequest();
+
+            AnimalType? animalType = _animalTypes.FirstOrDefault(t => t.Id == id);
+            if (animalType != null)
+            {
+                int index = _animalTypes.IndexOf(animalType);
+                if (!_animalTypes.Any(t => t.Type.ToLower().Contains(type.ToLower())))
                 {
-                    AnimalsType animalsType = new() { Id = SetNewId(), Type = stype };
-                    Entities.Add(animalsType);
-                    //Сохранить новый тип в файл
-                    return Ok(animalsType);
+                    _animalTypes.ElementAt(index).Type = type;
+                    await _animalTypeRepository.Update(animalType);
+                    return Ok(_animalTypes.ElementAt(index));
                 }
 
                 return Conflict();
@@ -76,74 +75,34 @@ namespace DripChip.Controllers
             return NotFound();
         }
 
-        [HttpPut("{id}")]
-        public async Task<ActionResult<AnimalsType>> UpdateAnimalsType(long? id, [FromBody] string? type)
-        {
-            if (id == null || id <= 0)
-                return BadRequest();
-
-            if (string.IsNullOrWhiteSpace(type))
-                return BadRequest();
-
-            IEnumerable<AnimalsType>? animalsTypes = await new GetEntities<AnimalsType>(Serializer).ReceiveEnumerable();
-
-            if (animalsTypes != null)
-            {
-                AnimalsType? animalsType = animalsTypes.FirstOrDefault(t => t.Id == id);
-                if (animalsType != null)
-                {
-                    if (!animalsTypes.Any(t => t.Type.ToLower().Contains(type.ToLower())))
-                    {
-                        animalsType.Type = type;
-                        //Сохранить изменение типа в файл
-                        return Ok(animalsType);
-                    }
-
-                    return Conflict();
-                }
-            }
-
-            return NotFound();
-        }
-
         [HttpDelete("{id}")]
         public async Task<StatusCodeResult> DeleteAnimalsType(long? id)
         {
-            if (id == null || id <= 0)
+            if (id == null || id <= 0 || !TypeNotUsed(id))
                 return BadRequest();
 
-            if (!TypeNotUsed(id))
-                return BadRequest();
-
-            IEnumerable<AnimalsType>? animalsTypes = await new GetEntities<AnimalsType>(Serializer).ReceiveEnumerable();
-
-            if (animalsTypes != null)
+            AnimalType? animalType = _animalTypes.FirstOrDefault(t => t.Id == id);
+            if (animalType != null)
             {
-                AnimalsType? animalsType = animalsTypes.FirstOrDefault(t => t.Id == id);
-                if (animalsType != null)
-                {
-                    Entities.Remove(animalsType);
-                    //Удалить из файла
-                    return Ok();
-                }
+                _animalTypes.Remove(animalType);
+                await _animalTypeRepository.Delete((long)id);
+                return Ok();
             }
 
             return NotFound();
         }
 
-        private long SetNewId() => Entities.Select(x => x.Id).Max() + 1;
-        private static bool TypeNotUsed(long? id, IEnumerable<Animal>? a = null)
+        private long SetNewId() => _animalTypes.Select(x => x.Id).Max() + 1;
+
+        private bool TypeNotUsed(long? id, IEnumerable<Animal>? a = null)
         {
             IEnumerable<Animal>? animals = a;
 
             if (a == null)
-            {
-                JsonAsyncSerializer<IEnumerable<Animal>> animalsSerializer = new() { Path = Path.Combine(Environment.CurrentDirectory, "DataBase/Animals.json") };
-                animals = new GetEntities<Animal>(animalsSerializer).ReceiveEnumerable().Result;
-            }
+                animals = _animalRepository.GetAll();
 
             if (animals != null)
-                return !animals.Any(a => a.AnimalTypes.Any(typeId => typeId == id));
+                return !animals.Any(a => a.AnimalTypes.Any(typeId => typeId.AnimalTypeId == id));
 
             return false;
         }

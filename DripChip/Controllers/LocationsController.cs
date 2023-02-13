@@ -1,92 +1,117 @@
-﻿using DripChip.Core.Serialization;
-using DripChip.DataBase;
+﻿using DripChip.Core.Helper;
+using DripChip.DataBase.Repositories;
 using DripChip.Models;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json.Nodes;
 
 namespace DripChip.Controllers
 {
     [ApiController]
     [Route("Locations")]
-    public sealed class LocationsController : BaseController<LocationPoint>
+    public sealed class LocationsController : ControllerBase
     {
-        protected internal override string PathToCurrentEntities => "DataBase/LocationPoints.json";
+        private readonly IAnimalRepository _animalRepository;
+        private readonly ILocationPointRepository _locationPointRepository;
+        private readonly List<LocationPoint> _locationPoints;
 
-        private IAsyncSerializer<IEnumerable<LocationPoint>>? _serializer;
-        protected internal override IAsyncSerializer<IEnumerable<LocationPoint>> Serializer
+        public LocationsController(IAnimalRepository animalRepository, ILocationPointRepository locationPointRepository)
         {
-            get => _serializer ?? throw new NullReferenceException("Сериализатор не был создан");
-            set => _serializer = value;
-        }
-
-        public LocationsController()
-        {
-            Serializer = new JsonAsyncSerializer<IEnumerable<LocationPoint>>()
-            { Path = Path.Combine(Environment.CurrentDirectory, PathToCurrentEntities) };
-
-            InitializeEntities();
+            _animalRepository = animalRepository;
+            _locationPointRepository = locationPointRepository;
+            _locationPoints = _locationPointRepository.GetAll().ToList();
         }
 
         [HttpGet("{id}")]
         public ActionResult<LocationPoint> GetLocationPoint(int? id)
         {
-            if (id == null || id <= 0)
-                return BadRequest();
+            if (id != null && id > 0)
+            {
+                LocationPoint? locationPoint = _locationPoints.FirstOrDefault(a => a.Id == id);
+                return locationPoint != null ? Ok(locationPoint) : NotFound();
+            }
 
-            LocationPoint? locationPoint = Entities.FirstOrDefault(a => a.Id == id);
-            if (locationPoint == null)
-                return NotFound();
-
-            return Ok(locationPoint);
+            return BadRequest();
         }
 
         [HttpPost]
-        public ActionResult<LocationPoint> AddLocationPoint([FromBody] (double? latitude, double? longitude) param)
+        public async Task<ActionResult<LocationPoint>> AddLocationPoint([FromBody] JsonObject data)
         {
-            if (!ValidateRequestDatas(param.latitude, param.longitude))
-                return BadRequest();
+            double? latitude = JsonObjectParser<double>.Parse(data, nameof(latitude));
+            double? longitude = JsonObjectParser<double>.Parse(data, nameof(longitude));
 
-            if (Entities.FirstOrDefault(p => p.Latitude == param.latitude && p.Longitude == param.longitude) != null)
+            if (ValidateRequestDatas(latitude, longitude))
+            {
+                if (_locationPoints.FirstOrDefault(p => p.Latitude == latitude && p.Longitude == longitude) == null)
+                {
+                    LocationPoint locationPoint = new()
+                    {
+                        Latitude = (double)latitude!,
+                        Longitude = (double)longitude!
+                    };
+
+                    _locationPoints.Add(locationPoint);
+                    await _locationPointRepository.Create(locationPoint);
+
+                    return CreatedAtAction(nameof(AddLocationPoint), locationPoint);
+                }
+
                 return Conflict();
+            }
 
-            LocationPoint locationPoint = new() { Id = SetNewId(), Latitude = (double)param.latitude!, Longitude = (double)param.longitude! };
-            //Сохранить новую точку в файл
-            return CreatedAtAction(nameof(AddLocationPoint), locationPoint);
+            return BadRequest();
         }
 
         [HttpPut("{id}")]
-        public ActionResult<LocationPoint> UpdateLocationPoint(long? id, [FromBody] (double? latitude, double? longitude) param)
+        public async Task<ActionResult<LocationPoint>> UpdateLocationPoint(long? id, [FromBody] JsonObject data)
         {
-            if (id == null || id <= 0 && !ValidateRequestDatas(param.latitude, param.longitude))
-                return BadRequest();
+            double? latitude = JsonObjectParser<double>.Parse(data, nameof(latitude));
+            double? longitude = JsonObjectParser<double>.Parse(data, nameof(longitude));
 
-            LocationPoint? locationPoint = Entities.FirstOrDefault(p => p.Id == id);
+            if (id != null && (id > 0 || ValidateRequestDatas(latitude, longitude)))
+            {
+                LocationPoint? locationPoint = _locationPoints.FirstOrDefault(p => p.Id == id);
 
-            if (locationPoint == null)
+                if (locationPoint != null)
+                {
+                    if (_locationPoints.FirstOrDefault(p => p.Latitude == latitude && p.Longitude == longitude) == null)
+                    {
+                        if (ValidateRequestDatas(latitude, longitude))
+                        {
+                            int index = _locationPoints.IndexOf(locationPoint);
+
+                            _locationPoints.ElementAt(index).Longitude = (double)longitude!;
+                            _locationPoints.ElementAt(index).Latitude = (double)latitude!;
+                            await _locationPointRepository.Update(_locationPoints.ElementAt(index));
+
+                            return Ok(locationPoint);
+                        }
+
+                        return BadRequest();
+                    }
+
+                    return Conflict();
+                }
+
                 return NotFound();
+            }
 
-            if (Entities.FirstOrDefault(p => p.Latitude == param.latitude && p.Longitude == param.longitude) != null)
-                return Conflict();
-
-            locationPoint.Longitude = (double)param.longitude!;
-            locationPoint.Latitude = (double)param.latitude!;
-            //Сохранить изменённую точку в файле
-            return Ok(locationPoint);
+            return BadRequest();
         }
 
         [HttpDelete("{id}")]
-        public StatusCodeResult DeleteLocationPoint(long? id)
+        public async Task<StatusCodeResult> DeleteLocationPoint(long? id)
         {
             if (id != null && id > 0)
             {
                 if (PointNotUsed(id))
                 {
-                    LocationPoint? locationPoint = Entities.FirstOrDefault(p => p.Id == id);
+                    LocationPoint? locationPoint = _locationPoints.FirstOrDefault(p => p.Id == id);
 
                     if (locationPoint == null)
                         return NotFound();
 
-                    Entities.Remove(locationPoint);
-                    //Сохранить изменения в файле
+                    _locationPoints.Remove(locationPoint);
+                    await _locationPointRepository.Delete((long)id);
                     return Ok();
                 }
             }
@@ -94,23 +119,20 @@ namespace DripChip.Controllers
             return BadRequest();
         }
 
-        public static bool PointNotUsed(long? id, IEnumerable<Animal>? a = null)
+        private long SetNewId() => _locationPoints.Select(x => x.Id).Max() + 1;
+
+        public bool PointNotUsed(long? id, IEnumerable<Animal>? a = null)
         {
             IEnumerable<Animal>? animals = a;
 
             if (a == null)
-            {
-                JsonAsyncSerializer<IEnumerable<Animal>> animalsSerializer = new() { Path = Path.Combine(Environment.CurrentDirectory, "DataBase/Animals.json") };
-                animals = new GetEntities<Animal>(animalsSerializer).ReceiveEnumerable().Result;
-            }
+                animals = _animalRepository.GetAll();
 
             if (animals != null)
-                return !animals.Any(a => a.VisitedLocations.Any(locationId => locationId == id));
+                return !animals.Any(a => a.VisitedLocations.Any(locationId => locationId.VisitedLocationId == id));
 
             return false;
         }
-
-        private long SetNewId() => Entities.Select(x => x.Id).Max() + 1;
 
         private static bool ValidateRequestDatas(double? latitude, double? longitude)
         {

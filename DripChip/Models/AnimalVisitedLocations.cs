@@ -1,6 +1,6 @@
 ﻿namespace DripChip.Models
 {
-    public class AnimalVisitedLocations
+    public partial class AnimalVisitedLocations
     {
         public long Id { get; set; }
         public DateTime DateTimeOfVisistLocationPoint { get; set; }
